@@ -4,7 +4,10 @@
 //
 // Unity 2020.3 notes:
 // - Linux64 can build with IL2CPP on the Linux agent if the linux-il2cpp module is
-//   installed. Win64 IL2CPP only builds on Windows, so the editor script uses Mono there.
+//   installed. Win64 IL2CPP only builds on Windows, so the editor script uses Mono there
+//   and marks the build's SUCCESS log line with "(MONO FALLBACK, ...)".
+// - Every other target is built with -noMonoFallback, so an IL2CPP project fails
+//   instead of quietly producing a Mono player when IL2CPP is unavailable.
 // - Agent image modules (UNITY_INSTALLS): 2020.3.49f1:ba48d4efcef1:windows-mono,webgl,linux-il2cpp
 def buildDir(String target, String buildType) {
   def projectPrefix = (env.PROJECT_DIR == '.') ? '' : "${env.PROJECT_DIR}/"
@@ -36,11 +39,14 @@ pipeline {
         axes {
           axis {
             // Unity -buildTarget names. Remove the platforms this project doesn't ship.
+            // Keep this exact spelling: the editor script names the output folder
+            // Builds/Linux64, Builds/Win64 or Builds/WebGL, and buildDir() must match it.
             name 'TARGET'
             values 'Linux64', 'Win64', 'WebGL'
           }
           axis {
-            // Add 'Development' to also build development players
+            // Add 'Development' to also build development players.
+            // 'Release' and 'Development' are the only values the editor script accepts.
             name 'BUILD_TYPE'
             values 'Release'
           }
@@ -94,6 +100,9 @@ pipeline {
                       set -eo pipefail
                       DEV_FLAG=""
                       if [ "$BUILD_TYPE" = "Development" ]; then DEV_FLAG="-devBuild"; fi
+                      # Win64 IL2CPP can't build on this Linux agent, so only Win64 may fall back to Mono
+                      MONO_FLAG="-noMonoFallback"
+                      if [ "$TARGET" = "Win64" ]; then MONO_FLAG=""; fi
                       xvfb-run --auto-servernum --server-args='-screen 0 1024x768x24' dbus-launch \
                       ~/Unity/Hub/Editor/2020.3.49f1/Editor/Unity \
                       -username "$UNITY_USER" \
@@ -104,6 +113,7 @@ pipeline {
                       -quit \
                       -projectPath "$PWD/$PROJECT_DIR" \
                       $DEV_FLAG \
+                      $MONO_FLAG \
                       -buildTarget "$TARGET" \
                       -buildType "$BUILD_TYPE" \
                       -executeMethod CommandLineBuild.Build \
